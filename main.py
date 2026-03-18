@@ -3,157 +3,36 @@ import signal
 import json
 import re
 import os
-import tempfile
-import posixpath
-from urllib.request import urlopen
-from urllib.parse import urlparse
-
-from ftpretty import ftpretty
+import tomllib
 
 from src.core import Plugin
 from src.plugin_system import setup_plugins
 
-WS_URL = "ws://jp.5.frp.one:40760"
-ACCESS_TOKEN = "NightMareMoon"
+_CONFIG_PATH = os.path.join(os.path.dirname(__file__), "config", "server.toml")
+
+
+def _load_server_config():
+    if not os.path.exists(_CONFIG_PATH):
+        raise FileNotFoundError(f"配置文件不存在: {_CONFIG_PATH}")
+    with open(_CONFIG_PATH, "rb") as f:
+        config_data = f.read().strip()
+    if not config_data:
+        raise ValueError(f"配置文件为空: {_CONFIG_PATH}")
+    config = tomllib.loads(config_data.decode("utf-8"))
+    ws_url = config.get("ws_url")
+    access_token = config.get("access_token")
+    if not ws_url:
+        raise ValueError("config/server.toml 缺少 ws_url")
+    return ws_url, access_token or ""
+
+
+WS_URL, ACCESS_TOKEN = _load_server_config()
 
 plugin = Plugin(url=WS_URL, token=ACCESS_TOKEN, debug=True)
 setup_plugins(plugin)
 
-FTP_HOST = "38.76.204.119"
-FTP_USER = "9ws7h3xr"
-FTP_PASS = "pMA0JAka"
-
-
 def _is_self(messenger) -> bool:
     return messenger.user_id == messenger.self_id
-
-
-
-
-def _extract_file_segments(message_segments):
-    if not isinstance(message_segments, list):
-        return []
-    targets = []
-    for seg in message_segments:
-        if not isinstance(seg, dict):
-            continue
-        seg_type = seg.get("type")
-        if seg_type not in ("file", "video", "record"):
-            continue
-        data = seg.get("data", {}) if isinstance(seg.get("data"), dict) else {}
-        file_id = data.get("file_id") or data.get("id")
-        file_name = data.get("file") or data.get("name")
-        targets.append({
-            "type": seg_type,
-            "file_id": file_id,
-            "file_name": file_name,
-        })
-    return targets
-
-
-async def _fetch_local_file(file_id, fallback_name: str):
-    if not file_id:
-        return None, "缺少 file_id"
-    if isinstance(file_id, str) and os.path.exists(file_id):
-        return file_id, None
-    file_id_str = str(file_id)
-    resp = await plugin.api.get_file(file_id_str)
-    if isinstance(resp, dict) and resp.get("retcode", 0) != 0 and file_id_str.startswith("/"):
-        resp = await plugin.api.get_file(file_id_str.lstrip("/"))
-    if isinstance(resp, dict) and resp.get("retcode", 0) != 0:
-        return None, f"get_file retcode={resp.get('retcode')}"
-    data = resp.get("data", {}) if isinstance(resp, dict) else {}
-    file_path = data.get("file") or data.get("path") or data.get("file_path")
-    if file_path and os.path.exists(file_path):
-        return file_path, None
-    if file_path and not os.path.exists(file_path):
-        file_url_resp = await plugin.api.get_file_url(file_id_str)
-        if isinstance(file_url_resp, dict) and file_url_resp.get("retcode", 0) == 0:
-            file_url_data = file_url_resp.get("data", {}) if isinstance(file_url_resp, dict) else {}
-            url = file_url_data.get("url")
-            if url:
-                return await _download_from_url(url, fallback_name)
-        if file_id_str.startswith("/"):
-            file_url_resp = await plugin.api.get_file_url(file_id_str.lstrip("/"))
-            if isinstance(file_url_resp, dict) and file_url_resp.get("retcode", 0) == 0:
-                file_url_data = file_url_resp.get("data", {}) if isinstance(file_url_resp, dict) else {}
-                url = file_url_data.get("url")
-                if url:
-                    return await _download_from_url(url, fallback_name)
-        return None, f"file_path 不存在: {file_path}"
-    url = data.get("url")
-    if url:
-        return await _download_from_url(url, fallback_name)
-    return None, "get_file 未返回路径或 url"
-
-
-async def _download_from_url(url: str, fallback_name: str):
-    parsed = urlparse(url)
-    if parsed.scheme in ("", "file"):
-        local_candidate = parsed.path if parsed.scheme == "file" else url
-        if os.path.exists(local_candidate):
-            return local_candidate, None
-        return None, f"本地路径不存在: {local_candidate}"
-    if len(parsed.scheme) == 1 and url[1:3] in (":\\", ":/"):
-        if os.path.exists(url):
-            return url, None
-        return None, "本地路径不存在"
-    if parsed.scheme not in ("http", "https"):
-        return None, f"不支持的 url scheme: {parsed.scheme}"
-    suffix = ""
-    if fallback_name and "." in fallback_name:
-        suffix = "." + fallback_name.split(".")[-1]
-    fd, tmp_path = tempfile.mkstemp(prefix="sncq_", suffix=suffix)
-    os.close(fd)
-    def _download():
-        with urlopen(url, timeout=20) as resp_obj, open(tmp_path, "wb") as f:
-            f.write(resp_obj.read())
-    await asyncio.to_thread(_download)
-    if os.path.exists(tmp_path):
-        return tmp_path, None
-    return None, "下载失败"
-
-
-FTP_REMOTE_DIR = "/public/static"
-
-
-async def _upload_file_to_ftp(local_path: str, remote_name: str) -> str:
-    remote_path = posixpath.join(FTP_REMOTE_DIR.rstrip("/"), remote_name)
-    def _do_upload():
-        ftp = ftpretty(FTP_HOST, FTP_USER, FTP_PASS)
-        try:
-            ftp.put(local_path, remote_path)
-        finally:
-            try:
-                ftp.close()
-            except Exception:
-                pass
-    await asyncio.to_thread(_do_upload)
-    return remote_path
-
-
-async def _upload_segments_to_ftp(message_id: int, message_segments):
-    uploads = []
-    for idx, seg in enumerate(_extract_file_segments(message_segments), start=1):
-        file_id = seg.get("file_id")
-        file_name = seg.get("file_name") or f"file_{idx}"
-        local_path, reason = await _fetch_local_file(file_id, file_name)
-        if not local_path:
-            detail = f"（{reason}）" if reason else ""
-            uploads.append(f"{file_name}: 获取本地文件失败{detail}")
-            continue
-        safe_name = os.path.basename(file_name)
-        remote_name = f"{message_id}_{idx}_{safe_name}"
-        try:
-            remote_path = await _upload_file_to_ftp(local_path, remote_name)
-            public_path = remote_path.replace("/public/static/", "").lstrip("/")
-            uploads.append(
-                f"{file_name}: 上传成功 -> {public_path}\n"
-                f"访问地址：https://nightmare.rsuo.xyz/static/{public_path}"
-            )
-        except Exception as e:
-            uploads.append(f"{file_name}: 上传失败 ({e})")
-    return uploads
 
 
 @plugin.on_msg(r"^/help$")
@@ -237,15 +116,7 @@ async def _(messenger, matches):
                     continue
             elif isinstance(content, (dict, list)):
                 content.pop("raw_message", None)
-                uploads = []
-                if isinstance(content, dict):
-                    uploads = await _upload_segments_to_ftp(
-                        content.get("message_id", 0) or forward_id,
-                        content.get("message"),
-                    )
                 content = json.dumps(content, ensure_ascii=False, indent=2)
-                if uploads:
-                    content += "\n\n附件上传结果：\n" + "\n".join(uploads)
 
             nodes.append({
                 "type": "node",
@@ -289,10 +160,7 @@ async def _(messenger, matches):
             nickname = original_sender.get("nickname") or str(original_sender.get("user_id", "未知"))
             uin = original_sender.get("user_id") or 0
             data.pop("raw_message", None)
-            uploads = await _upload_segments_to_ftp(message_id, data.get("message"))
             content = json.dumps(data, ensure_ascii=False, indent=2)
-            if uploads:
-                content += "\n\n附件上传结果：\n" + "\n".join(uploads)
             nodes = [{
                 "type": "node",
                 "data": {
