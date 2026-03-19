@@ -1,0 +1,4 @@
+# NapCatQQ WebSocket 服务端地址
+ws_url = "ws://YOUR_WS_URL_HERE"
+# 服务端 Access Token
+access_token = "YOUR_ACCESS_TOKEN_HERE"

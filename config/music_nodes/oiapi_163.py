@@ -1,8 +1,11 @@
 from src.plugins.music.node import MusicAPINode, MusicInfo
 
 
-class OiapiMusic163Node(MusicAPINode):
-    """OIAPI 网易云音乐节点"""
+class OiApiMusic163Node(MusicAPINode):
+    """OiApi 网易云音乐节点
+    
+    该节点支持付费歌曲
+    """
 
     api_url = "https://oiapi.net/api/Music_163"
     display_name = "oiapi_music_163"

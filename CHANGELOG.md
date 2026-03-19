@@ -1,5 +1,34 @@
 # 更新日志
 
+## [1.1.1] - 2026-03-20
+
+### Added
+- 权限管理支持
+  - 新增 `config/bot.toml` 配置文件
+  - 支持指定多个 QQ 号作为 Bot 的主人账号
+- system_tools 插件
+  - 详见 Changed
+- 回复撤回
+  - 回复一条消息(可带@)发送"撤回"，如果被回复消息由 Bot 发送或 Bot 本身是群管理时，尝试撤回该消息
+
+### Changed
+- main.py 重构
+  - 将位于`main.py`中的`/help`等功能更换至`system_tools`
+
+### Fixed
+  - picsearcher 图片反转功能无实际效果
+
+### Security
+- picsearcher 权限管理支持
+  - 只有主人账号才可控制图片功能开关
+
+### Known Issues
+- 缺少 requirements.txt 依赖声明文件
+- 临时文件夹 temp/ 未实现自动清理功能
+- `/help`功能返回的指令列表不全面
+
+---
+
 ## [1.1.0] - 2026-03-18
 
 ### Added
@@ -16,14 +45,14 @@
   - 添加项目架构说明
 
 ### Changed
-- **main.py 重构**
+- main.py 重构
   - 移除硬编码的 WebSocket URL 和 Token
   - 新增 `_load_server_config()` 配置加载函数
   - 优化配置管理逻辑
-- **插件系统修复**
+- 插件系统修复
   - 修复 `src/plugin_system.py` 中插件引入问题
-  - 取消 deer_checkin, music 的注视，并完成 picsearcher 完整实现
-- **安全增强**
+  - 取消 deer_checkin, music 的注释，并完成 picsearcher 完整实现
+- 安全增强
   - 将 `config/server.toml` 添加到 .gitignore
   - 防止敏感配置信息被提交到版本控制
 

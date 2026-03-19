@@ -10,6 +10,7 @@ from urllib.parse import urlparse
 
 from src.core.messenger import Messenger, MessengerBuilder
 from src.core.plugin import Plugin
+from src.core.auth import is_admin
 
 
 API_URL = "https://api.lolicon.app/setu/v2"
@@ -150,9 +151,16 @@ def _download_image(url: str, dest_dir: Path) -> Optional[Path]:
     dest_dir.mkdir(parents=True, exist_ok=True)
     target = dest_dir / f"setu_{abs(hash(url))}{suffix}"
     try:
-        req = Request(url)
-        with urlopen(req, timeout=20) as resp, open(target, "wb") as f:
-            f.write(resp.read())
+        req = Request(url, headers={"User-Agent": "SNCQPlugin/1.0"})
+        with urlopen(req, timeout=20) as resp:
+            data = resp.read()
+            content_type = resp.headers.get("Content-Type", "")
+        if suffix == ".jpg" and "image/png" in content_type:
+            target = target.with_suffix(".png")
+        elif suffix == ".jpg" and "image/webp" in content_type:
+            target = target.with_suffix(".webp")
+        with open(target, "wb") as f:
+            f.write(data)
         return target
     except Exception:
         return None
@@ -160,12 +168,13 @@ def _download_image(url: str, dest_dir: Path) -> Optional[Path]:
 
 def _invert_image(path: Path) -> Optional[Path]:
     try:
-        from PIL import Image
+        from PIL import Image, ImageOps
     except Exception:
         return None
     try:
         img = Image.open(path)
-        inverted = img.transpose(Image.FLIP_TOP_BOTTOM)
+        img.load()
+        inverted = ImageOps.flip(img)
         target = path.with_name(path.stem + "_inv" + path.suffix)
         inverted.save(target)
         return target
@@ -190,7 +199,7 @@ def _resolve_image_uri(messenger: Messenger, item: Dict[str, Any]) -> Optional[s
     inverted = _invert_image(local_path)
     if not inverted:
         return img_url
-    return f"file://{inverted}"
+    return str(inverted)
 
 
 def _format_caption(item: Dict[str, Any]) -> str:
@@ -233,9 +242,17 @@ async def _fetch_setu(payload: Dict[str, Any]) -> Dict[str, Any]:
 def register(plugin: Plugin) -> None:
     sender = plugin.get_sender()
 
+    async def _ensure_admin(messenger: Messenger) -> bool:
+        if is_admin(messenger.user_id):
+            return True
+        await sender.reply(messenger, "无权限操作")
+        return False
+
     @plugin.on_msg(r"(?i)^允许(r18|(涩|色|瑟)图)(功能)?$")
     async def allow_r18(messenger: Messenger, matches):
         if _is_self(messenger):
+            return
+        if not await _ensure_admin(messenger):
             return
         scope_key = _get_scope_key(messenger)
         config = _load_scope_config(scope_key)
@@ -247,6 +264,8 @@ def register(plugin: Plugin) -> None:
     async def disable_r18(messenger: Messenger, matches):
         if _is_self(messenger):
             return
+        if not await _ensure_admin(messenger):
+            return
         scope_key = _get_scope_key(messenger)
         config = _load_scope_config(scope_key)
         config["allow_r18"] = False
@@ -256,6 +275,8 @@ def register(plugin: Plugin) -> None:
     @plugin.on_msg(r"^开启图片功能$")
     async def enable_picsearch(messenger: Messenger, matches):
         if _is_self(messenger):
+            return
+        if not await _ensure_admin(messenger):
             return
         scope_key = _get_scope_key(messenger)
         config = _load_scope_config(scope_key)
@@ -267,6 +288,8 @@ def register(plugin: Plugin) -> None:
     async def disable_picsearch(messenger: Messenger, matches):
         if _is_self(messenger):
             return
+        if not await _ensure_admin(messenger):
+            return
         scope_key = _get_scope_key(messenger)
         config = _load_scope_config(scope_key)
         config["enable_picsearch"] = False
@@ -276,6 +299,8 @@ def register(plugin: Plugin) -> None:
     @plugin.on_msg(r"^允许图片反转(功能)?$")
     async def enable_invert(messenger: Messenger, matches):
         if _is_self(messenger):
+            return
+        if not await _ensure_admin(messenger):
             return
         scope_key = _get_scope_key(messenger)
         config = _load_scope_config(scope_key)
@@ -287,6 +312,8 @@ def register(plugin: Plugin) -> None:
     async def disable_invert(messenger: Messenger, matches):
         if _is_self(messenger):
             return
+        if not await _ensure_admin(messenger):
+            return
         scope_key = _get_scope_key(messenger)
         config = _load_scope_config(scope_key)
         config["invert_image"] = False
@@ -297,6 +324,8 @@ def register(plugin: Plugin) -> None:
     async def allow_ai(messenger: Messenger, matches):
         if _is_self(messenger):
             return
+        if not await _ensure_admin(messenger):
+            return
         scope_key = _get_scope_key(messenger)
         config = _load_scope_config(scope_key)
         config["allow_ai"] = True
@@ -306,6 +335,8 @@ def register(plugin: Plugin) -> None:
     @plugin.on_msg(r"(?i)^关闭(包含)?AI图片(功能)?$")
     async def disable_ai(messenger: Messenger, matches):
         if _is_self(messenger):
+            return
+        if not await _ensure_admin(messenger):
             return
         scope_key = _get_scope_key(messenger)
         config = _load_scope_config(scope_key)

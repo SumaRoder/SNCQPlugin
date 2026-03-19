@@ -6,6 +6,7 @@ from src.core.plugin import Plugin
 from src.plugins.deer_checkin import register as register_deer_checkin
 from src.plugins.music import register as register_music
 from src.plugins.picsearcher import register as register_picsearcher
+from src.plugins.system_tools import register as register_system_tools
 
 
 RegisterFunc = Callable[[Plugin], None]
@@ -26,6 +27,11 @@ class PluginSystem:
 
 
 def setup_plugins(plugin: Plugin) -> PluginSystem:
-    system = PluginSystem([register_picsearcher]) # PluginSystem([register_deer_checkin, register_music])
+    system = PluginSystem([
+        register_system_tools,
+        register_picsearcher,
+        register_deer_checkin,
+        register_music,
+    ])
     system.register_all(plugin)
     return system
